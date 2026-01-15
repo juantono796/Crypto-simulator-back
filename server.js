@@ -1,8 +1,9 @@
-// server.js - Backend para Crypto Trading Bot
+// server.js - Backend para Crypto Trading Bot (CON PROXY PARA EVITAR BLOQUEO)
 // Deploy en Render como Web Service
 
 const express = require('express');
 const cors = require('cors');
+const https = require('https');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -11,16 +12,14 @@ const PORT = process.env.PORT || 3001;
 const allowedOrigins = [
     'http://localhost:3000',
     'http://localhost:5000',
-    'https://crypto-bot-frontend.onrender.com', // Cambia esto por tu URL de frontend
+    'https://crypto-simulator-front.onrender.com', // Cambia por tu URL de frontend
     /\.onrender\.com$/, // Permite todos los subdominios de render
 ];
 
 app.use(cors({
     origin: function(origin, callback) {
-        // Permitir requests sin origin (como Postman, curl, etc)
         if (!origin) return callback(null, true);
         
-        // Verificar si el origin está permitido
         const isAllowed = allowedOrigins.some(allowed => {
             if (allowed instanceof RegExp) {
                 return allowed.test(origin);
@@ -51,8 +50,8 @@ app.use((req, res, next) => {
 app.get('/', (req, res) => {
     res.json({
         status: 'ok',
-        message: 'Crypto Trading Bot Backend',
-        version: '1.0.0',
+        message: 'Crypto Trading Bot Backend (with proxy)',
+        version: '1.0.1',
         timestamp: new Date().toISOString(),
         endpoints: {
             health: '/',
@@ -63,10 +62,59 @@ app.get('/', (req, res) => {
     });
 });
 
-// Health check alternativo
 app.get('/health', (req, res) => {
     res.json({ status: 'ok', uptime: process.uptime() });
 });
+
+// ==========================================
+// FUNCIÓN HELPER PARA FETCH CON HEADERS
+// ==========================================
+
+async function fetchBinance(url) {
+    return new Promise((resolve, reject) => {
+        const urlObj = new URL(url);
+        
+        const options = {
+            hostname: urlObj.hostname,
+            path: urlObj.pathname + urlObj.search,
+            method: 'GET',
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'application/json',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'Connection': 'keep-alive',
+                'Cache-Control': 'no-cache',
+            }
+        };
+
+        const req = https.request(options, (res) => {
+            let data = '';
+
+            res.on('data', (chunk) => {
+                data += chunk;
+            });
+
+            res.on('end', () => {
+                if (res.statusCode === 200) {
+                    try {
+                        resolve(JSON.parse(data));
+                    } catch (e) {
+                        reject(new Error('Invalid JSON response'));
+                    }
+                } else {
+                    reject(new Error(`HTTP ${res.statusCode}: ${data}`));
+                }
+            });
+        });
+
+        req.on('error', (error) => {
+            reject(error);
+        });
+
+        req.end();
+    });
+}
 
 // ==========================================
 // BINANCE API ENDPOINTS
@@ -77,13 +125,7 @@ app.get('/api/binance/ticker', async (req, res) => {
     try {
         console.log('📊 Fetching Binance ticker data...');
         
-        const response = await fetch('https://api.binance.com/api/v3/ticker/24hr');
-        
-        if (!response.ok) {
-            throw new Error(`Binance API error: ${response.status} ${response.statusText}`);
-        }
-        
-        const data = await response.json();
+        const data = await fetchBinance('https://api.binance.com/api/v3/ticker/24hr');
         
         // Filtrar solo pares USDT principales
         const mainPairs = [
@@ -126,13 +168,7 @@ app.get('/api/binance/price/:symbol?', async (req, res) => {
         
         console.log(`💰 Fetching price for: ${symbol || 'all'}`);
         
-        const response = await fetch(url);
-        
-        if (!response.ok) {
-            throw new Error(`Binance API error: ${response.status}`);
-        }
-        
-        const data = await response.json();
+        const data = await fetchBinance(url);
         
         res.json({
             success: true,
@@ -163,13 +199,7 @@ app.get('/api/binance/klines', async (req, res) => {
         
         const url = `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`;
         
-        const response = await fetch(url);
-        
-        if (!response.ok) {
-            throw new Error(`Binance API error: ${response.status}`);
-        }
-        
-        const data = await response.json();
+        const data = await fetchBinance(url);
         
         // Transformar a formato más amigable
         const formatted = data.map(k => ({
@@ -207,13 +237,7 @@ app.get('/api/binance/exchangeInfo', async (req, res) => {
     try {
         console.log('ℹ️ Fetching exchange info...');
         
-        const response = await fetch('https://api.binance.com/api/v3/exchangeInfo');
-        
-        if (!response.ok) {
-            throw new Error(`Binance API error: ${response.status}`);
-        }
-        
-        const data = await response.json();
+        const data = await fetchBinance('https://api.binance.com/api/v3/exchangeInfo');
         
         // Solo devolver info de los pares principales
         const mainPairs = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT'];
@@ -273,7 +297,7 @@ app.use((err, req, res, next) => {
 
 app.listen(PORT, () => {
     console.log('\n' + '='.repeat(50));
-    console.log('🚀 Crypto Trading Bot Backend');
+    console.log('🚀 Crypto Trading Bot Backend (with proxy)');
     console.log('='.repeat(50));
     console.log(`📡 Server running on port ${PORT}`);
     console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
