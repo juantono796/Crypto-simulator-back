@@ -1,5 +1,5 @@
-// server.js - Backend para Crypto Trading Bot (CON PROXY PARA EVITAR BLOQUEO)
-// Deploy en Render como Web Service
+// server.js - Backend con Binance API alternativa (sin restricciones geográficas)
+// Usa api1.binance.com o api2.binance.com en lugar de api.binance.com
 
 const express = require('express');
 const cors = require('cors');
@@ -12,8 +12,8 @@ const PORT = process.env.PORT || 3001;
 const allowedOrigins = [
     'http://localhost:3000',
     'http://localhost:5000',
-    'https://crypto-simulator-front.onrender.com', // Cambia por tu URL de frontend
-    /\.onrender\.com$/, // Permite todos los subdominios de render
+    'https://crypto-simulator-front.onrender.com',
+    /\.onrender\.com$/,
 ];
 
 app.use(cors({
@@ -42,7 +42,7 @@ app.use(express.json());
 // Logging middleware
 app.use((req, res, next) => {
     const timestamp = new Date().toISOString();
-    console.log(`[${timestamp}] ${req.method} ${req.path} - Origin: ${req.headers.origin || 'none'}`);
+    console.log(`[${timestamp}] ${req.method} ${req.path}`);
     next();
 });
 
@@ -50,14 +50,14 @@ app.use((req, res, next) => {
 app.get('/', (req, res) => {
     res.json({
         status: 'ok',
-        message: 'Crypto Trading Bot Backend (with proxy)',
-        version: '1.0.1',
+        message: 'Crypto Trading Bot Backend (Alternative Binance API)',
+        version: '2.0.0',
         timestamp: new Date().toISOString(),
+        binanceEndpoint: 'data.binance.com',
         endpoints: {
             health: '/',
             binanceTicker: '/api/binance/ticker',
             binancePrice: '/api/binance/price/:symbol?',
-            binanceKlines: '/api/binance/klines',
         }
     });
 });
@@ -67,24 +67,20 @@ app.get('/health', (req, res) => {
 });
 
 // ==========================================
-// FUNCIÓN HELPER PARA FETCH CON HEADERS
+// FUNCIÓN HELPER PARA FETCH CON BINANCE ALTERNATIVO
 // ==========================================
 
-async function fetchBinance(url) {
+async function fetchBinanceData(endpoint) {
     return new Promise((resolve, reject) => {
-        const urlObj = new URL(url);
-        
+        // USAR DOMINIO ALTERNATIVO: data.binance.com
+        // Este dominio NO tiene restricciones geográficas
         const options = {
-            hostname: urlObj.hostname,
-            path: urlObj.pathname + urlObj.search,
+            hostname: 'data.binance.com',
+            path: endpoint,
             method: 'GET',
             headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
                 'Accept': 'application/json',
-                'Accept-Language': 'en-US,en;q=0.9',
-                'Accept-Encoding': 'gzip, deflate, br',
-                'Connection': 'keep-alive',
-                'Cache-Control': 'no-cache',
             }
         };
 
@@ -112,6 +108,11 @@ async function fetchBinance(url) {
             reject(error);
         });
 
+        req.setTimeout(10000, () => {
+            req.destroy();
+            reject(new Error('Request timeout'));
+        });
+
         req.end();
     });
 }
@@ -123,9 +124,9 @@ async function fetchBinance(url) {
 // Endpoint: Obtener ticker 24hr de Binance
 app.get('/api/binance/ticker', async (req, res) => {
     try {
-        console.log('📊 Fetching Binance ticker data...');
+        console.log('📊 Fetching from data.binance.com...');
         
-        const data = await fetchBinance('https://api.binance.com/api/v3/ticker/24hr');
+        const data = await fetchBinanceData('/api/v3/ticker/24hr');
         
         // Filtrar solo pares USDT principales
         const mainPairs = [
@@ -137,17 +138,18 @@ app.get('/api/binance/ticker', async (req, res) => {
         
         const filtered = data.filter(ticker => mainPairs.includes(ticker.symbol));
         
-        console.log(`✅ Returning ${filtered.length} tickers`);
+        console.log(`✅ Successfully fetched ${filtered.length} tickers`);
         
         res.json({
             success: true,
+            source: 'data.binance.com',
             count: filtered.length,
             timestamp: new Date().toISOString(),
             data: filtered
         });
         
     } catch (error) {
-        console.error('❌ Error fetching Binance ticker:', error.message);
+        console.error('❌ Error:', error.message);
         res.status(500).json({
             success: false,
             error: 'Failed to fetch Binance data',
@@ -157,27 +159,28 @@ app.get('/api/binance/ticker', async (req, res) => {
     }
 });
 
-// Endpoint: Obtener precio actual de una o todas las criptos
+// Endpoint: Obtener precio actual
 app.get('/api/binance/price/:symbol?', async (req, res) => {
     try {
         const { symbol } = req.params;
         
-        const url = symbol 
-            ? `https://api.binance.com/api/v3/ticker/price?symbol=${symbol.toUpperCase()}`
-            : 'https://api.binance.com/api/v3/ticker/price';
+        const endpoint = symbol 
+            ? `/api/v3/ticker/price?symbol=${symbol.toUpperCase()}`
+            : '/api/v3/ticker/price';
         
-        console.log(`💰 Fetching price for: ${symbol || 'all'}`);
+        console.log(`💰 Fetching price: ${symbol || 'all'}`);
         
-        const data = await fetchBinance(url);
+        const data = await fetchBinanceData(endpoint);
         
         res.json({
             success: true,
+            source: 'data.binance.com',
             timestamp: new Date().toISOString(),
             data: data
         });
         
     } catch (error) {
-        console.error('❌ Error fetching price:', error.message);
+        console.error('❌ Error:', error.message);
         res.status(500).json({
             success: false,
             error: error.message,
@@ -186,7 +189,7 @@ app.get('/api/binance/price/:symbol?', async (req, res) => {
     }
 });
 
-// Endpoint: Obtener histórico de velas (klines)
+// Endpoint: Obtener klines
 app.get('/api/binance/klines', async (req, res) => {
     try {
         const { 
@@ -195,13 +198,11 @@ app.get('/api/binance/klines', async (req, res) => {
             limit = 60 
         } = req.query;
         
-        console.log(`📈 Fetching klines for ${symbol} (${interval}, limit: ${limit})`);
+        console.log(`📈 Fetching klines: ${symbol}`);
         
-        const url = `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`;
+        const endpoint = `/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`;
+        const data = await fetchBinanceData(endpoint);
         
-        const data = await fetchBinance(url);
-        
-        // Transformar a formato más amigable
         const formatted = data.map(k => ({
             openTime: k[0],
             open: parseFloat(k[1]),
@@ -215,6 +216,7 @@ app.get('/api/binance/klines', async (req, res) => {
         
         res.json({
             success: true,
+            source: 'data.binance.com',
             symbol: symbol,
             interval: interval,
             count: formatted.length,
@@ -223,36 +225,7 @@ app.get('/api/binance/klines', async (req, res) => {
         });
         
     } catch (error) {
-        console.error('❌ Error fetching klines:', error.message);
-        res.status(500).json({
-            success: false,
-            error: error.message,
-            timestamp: new Date().toISOString()
-        });
-    }
-});
-
-// Endpoint: Obtener información del exchange
-app.get('/api/binance/exchangeInfo', async (req, res) => {
-    try {
-        console.log('ℹ️ Fetching exchange info...');
-        
-        const data = await fetchBinance('https://api.binance.com/api/v3/exchangeInfo');
-        
-        // Solo devolver info de los pares principales
-        const mainPairs = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT'];
-        const symbols = data.symbols.filter(s => mainPairs.includes(s.symbol));
-        
-        res.json({
-            success: true,
-            timestamp: new Date().toISOString(),
-            timezone: data.timezone,
-            serverTime: data.serverTime,
-            symbols: symbols
-        });
-        
-    } catch (error) {
-        console.error('❌ Error fetching exchange info:', error.message);
+        console.error('❌ Error:', error.message);
         res.status(500).json({
             success: false,
             error: error.message,
@@ -265,25 +238,16 @@ app.get('/api/binance/exchangeInfo', async (req, res) => {
 // ERROR HANDLERS
 // ==========================================
 
-// 404 handler
 app.use((req, res) => {
     res.status(404).json({
         success: false,
         error: 'Endpoint not found',
-        path: req.path,
-        availableEndpoints: {
-            health: '/',
-            binanceTicker: '/api/binance/ticker',
-            binancePrice: '/api/binance/price/:symbol?',
-            binanceKlines: '/api/binance/klines',
-            exchangeInfo: '/api/binance/exchangeInfo'
-        }
+        path: req.path
     });
 });
 
-// Global error handler
 app.use((err, req, res, next) => {
-    console.error('💥 Unhandled error:', err);
+    console.error('💥 Error:', err);
     res.status(500).json({
         success: false,
         error: 'Internal server error',
@@ -296,29 +260,21 @@ app.use((err, req, res, next) => {
 // ==========================================
 
 app.listen(PORT, () => {
-    console.log('\n' + '='.repeat(50));
-    console.log('🚀 Crypto Trading Bot Backend (with proxy)');
-    console.log('='.repeat(50));
-    console.log(`📡 Server running on port ${PORT}`);
-    console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
-    console.log(`⏰ Started at: ${new Date().toISOString()}`);
-    console.log('='.repeat(50) + '\n');
-    console.log('📋 Available endpoints:');
-    console.log(`   GET  /                           - Health check`);
-    console.log(`   GET  /api/binance/ticker         - 24hr ticker data`);
-    console.log(`   GET  /api/binance/price/:symbol  - Current price`);
-    console.log(`   GET  /api/binance/klines         - Historical data`);
-    console.log(`   GET  /api/binance/exchangeInfo   - Exchange info`);
-    console.log('\n' + '='.repeat(50) + '\n');
+    console.log('\n' + '='.repeat(60));
+    console.log('🚀 Crypto Trading Bot Backend');
+    console.log('📡 Using: data.binance.com (No geo-restrictions)');
+    console.log('='.repeat(60));
+    console.log(`📍 Port: ${PORT}`);
+    console.log(`⏰ Started: ${new Date().toISOString()}`);
+    console.log('='.repeat(60) + '\n');
 });
 
-// Graceful shutdown
 process.on('SIGTERM', () => {
-    console.log('👋 SIGTERM received, shutting down gracefully...');
+    console.log('👋 Shutting down...');
     process.exit(0);
 });
 
 process.on('SIGINT', () => {
-    console.log('👋 SIGINT received, shutting down gracefully...');
+    console.log('👋 Shutting down...');
     process.exit(0);
 });
