@@ -1,5 +1,5 @@
-// server.js - Backend con Binance API alternativa (sin restricciones geográficas)
-// Usa api1.binance.com o api2.binance.com en lugar de api.binance.com
+// server.js - Backend con Binance.US API
+// Binance.US NO tiene restricciones geográficas en USA
 
 const express = require('express');
 const cors = require('cors');
@@ -8,7 +8,6 @@ const https = require('https');
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// IMPORTANTE: Permitir requests desde tu frontend en Render
 const allowedOrigins = [
     'http://localhost:3000',
     'http://localhost:5000',
@@ -39,21 +38,19 @@ app.use(cors({
 
 app.use(express.json());
 
-// Logging middleware
 app.use((req, res, next) => {
     const timestamp = new Date().toISOString();
     console.log(`[${timestamp}] ${req.method} ${req.path}`);
     next();
 });
 
-// Health check
 app.get('/', (req, res) => {
     res.json({
         status: 'ok',
-        message: 'Crypto Trading Bot Backend (Alternative Binance API)',
-        version: '2.0.0',
+        message: 'Crypto Trading Bot Backend',
+        version: '4.0.0',
+        dataSource: 'Binance.US API',
         timestamp: new Date().toISOString(),
-        binanceEndpoint: 'data.binance.com',
         endpoints: {
             health: '/',
             binanceTicker: '/api/binance/ticker',
@@ -67,15 +64,13 @@ app.get('/health', (req, res) => {
 });
 
 // ==========================================
-// FUNCIÓN HELPER PARA FETCH CON BINANCE ALTERNATIVO
+// FUNCIÓN PARA BINANCE.US
 // ==========================================
 
-async function fetchBinanceData(endpoint) {
+function fetchBinanceUS(endpoint) {
     return new Promise((resolve, reject) => {
-        // USAR DOMINIO ALTERNATIVO: data.binance.com
-        // Este dominio NO tiene restricciones geográficas
         const options = {
-            hostname: 'data.binance.com',
+            hostname: 'api.binance.us', // ← BINANCE.US en lugar de api.binance.com
             path: endpoint,
             method: 'GET',
             headers: {
@@ -99,7 +94,7 @@ async function fetchBinanceData(endpoint) {
                         reject(new Error('Invalid JSON response'));
                     }
                 } else {
-                    reject(new Error(`HTTP ${res.statusCode}: ${data}`));
+                    reject(new Error(`HTTP ${res.statusCode}: ${data.substring(0, 200)}`));
                 }
             });
         });
@@ -118,31 +113,30 @@ async function fetchBinanceData(endpoint) {
 }
 
 // ==========================================
-// BINANCE API ENDPOINTS
+// BINANCE.US ENDPOINTS
 // ==========================================
 
-// Endpoint: Obtener ticker 24hr de Binance
 app.get('/api/binance/ticker', async (req, res) => {
     try {
-        console.log('📊 Fetching from data.binance.com...');
+        console.log('📊 Fetching from Binance.US...');
         
-        const data = await fetchBinanceData('/api/v3/ticker/24hr');
+        const data = await fetchBinanceUS('/api/v3/ticker/24hr');
         
-        // Filtrar solo pares USDT principales
+        // Filtrar solo pares USDT principales (los que existen en Binance.US)
         const mainPairs = [
             'BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 
-            'XRPUSDT', 'ADAUSDT', 'AVAXUSDT', 'DOGEUSDT',
+            'ADAUSDT', 'AVAXUSDT', 'DOGEUSDT',
             'DOTUSDT', 'MATICUSDT', 'LINKUSDT', 'LTCUSDT',
-            'UNIUSDT', 'ATOMUSDT', 'SHIBUSDT'
+            'UNIUSDT', 'ATOMUSDT'
         ];
         
         const filtered = data.filter(ticker => mainPairs.includes(ticker.symbol));
         
-        console.log(`✅ Successfully fetched ${filtered.length} tickers`);
+        console.log(`✅ Successfully fetched ${filtered.length} tickers from Binance.US`);
         
         res.json({
             success: true,
-            source: 'data.binance.com',
+            source: 'Binance.US',
             count: filtered.length,
             timestamp: new Date().toISOString(),
             data: filtered
@@ -152,14 +146,13 @@ app.get('/api/binance/ticker', async (req, res) => {
         console.error('❌ Error:', error.message);
         res.status(500).json({
             success: false,
-            error: 'Failed to fetch Binance data',
+            error: 'Failed to fetch Binance.US data',
             message: error.message,
             timestamp: new Date().toISOString()
         });
     }
 });
 
-// Endpoint: Obtener precio actual
 app.get('/api/binance/price/:symbol?', async (req, res) => {
     try {
         const { symbol } = req.params;
@@ -168,60 +161,15 @@ app.get('/api/binance/price/:symbol?', async (req, res) => {
             ? `/api/v3/ticker/price?symbol=${symbol.toUpperCase()}`
             : '/api/v3/ticker/price';
         
-        console.log(`💰 Fetching price: ${symbol || 'all'}`);
+        console.log(`💰 Fetching price from Binance.US: ${symbol || 'all'}`);
         
-        const data = await fetchBinanceData(endpoint);
+        const data = await fetchBinanceUS(endpoint);
         
         res.json({
             success: true,
-            source: 'data.binance.com',
+            source: 'Binance.US',
             timestamp: new Date().toISOString(),
             data: data
-        });
-        
-    } catch (error) {
-        console.error('❌ Error:', error.message);
-        res.status(500).json({
-            success: false,
-            error: error.message,
-            timestamp: new Date().toISOString()
-        });
-    }
-});
-
-// Endpoint: Obtener klines
-app.get('/api/binance/klines', async (req, res) => {
-    try {
-        const { 
-            symbol = 'BTCUSDT', 
-            interval = '1h', 
-            limit = 60 
-        } = req.query;
-        
-        console.log(`📈 Fetching klines: ${symbol}`);
-        
-        const endpoint = `/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`;
-        const data = await fetchBinanceData(endpoint);
-        
-        const formatted = data.map(k => ({
-            openTime: k[0],
-            open: parseFloat(k[1]),
-            high: parseFloat(k[2]),
-            low: parseFloat(k[3]),
-            close: parseFloat(k[4]),
-            volume: parseFloat(k[5]),
-            closeTime: k[6],
-            trades: k[8]
-        }));
-        
-        res.json({
-            success: true,
-            source: 'data.binance.com',
-            symbol: symbol,
-            interval: interval,
-            count: formatted.length,
-            timestamp: new Date().toISOString(),
-            data: formatted
         });
         
     } catch (error) {
@@ -262,7 +210,7 @@ app.use((err, req, res, next) => {
 app.listen(PORT, () => {
     console.log('\n' + '='.repeat(60));
     console.log('🚀 Crypto Trading Bot Backend');
-    console.log('📡 Using: data.binance.com (No geo-restrictions)');
+    console.log('📡 Using: Binance.US API (No geo-restrictions)');
     console.log('='.repeat(60));
     console.log(`📍 Port: ${PORT}`);
     console.log(`⏰ Started: ${new Date().toISOString()}`);
